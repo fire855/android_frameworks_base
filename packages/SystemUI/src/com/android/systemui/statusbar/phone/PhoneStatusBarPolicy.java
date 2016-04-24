@@ -129,6 +129,9 @@ public class PhoneStatusBarPolicy implements Callback {
             else if (action.equals(TelecomManager.ACTION_CURRENT_TTY_MODE_CHANGED)) {
                 updateTTY(intent);
             }
+            else if (action.equals(Intent.ACTION_HEADSET_PLUG)) {
+                updateHeadset(intent);
+            }
         }
     };
 
@@ -166,6 +169,7 @@ public class PhoneStatusBarPolicy implements Callback {
         filter.addAction(AudioManager.INTERNAL_RINGER_MODE_CHANGED_ACTION);
         filter.addAction(TelephonyIntents.ACTION_SIM_STATE_CHANGED);
         filter.addAction(TelecomManager.ACTION_CURRENT_TTY_MODE_CHANGED);
+        filter.addAction(Intent.ACTION_HEADSET_PLUG);
         mContext.registerReceiver(mIntentReceiver, filter, null, mHandler);
 
         // listen for user / profile change.
@@ -638,6 +642,26 @@ public class PhoneStatusBarPolicy implements Callback {
             publishSuCustomTile();
         } else {
             unpublishSuCustomTile();
+        }
+    }
+
+    private final void updateHeadset(Intent intent) {
+        final String action = intent.getAction();
+        final int state = intent.getIntExtra("state", 4);
+        final int mic = intent.getIntExtra("microphone", 4);
+
+        switch (state) {
+            case 0:
+                mService.setIconVisibility("headset", false);
+		break;
+            case 1:
+                if (mic == 1) {
+                    mService.setIcon("headset", R.drawable.stat_sys_headset_with_mic, 0, null);
+                } else {
+                    mService.setIcon("headset", R.drawable.stat_sys_headset_without_mic, 0, null);
+                }
+                mService.setIconVisibility("headset", true);
+                break;
         }
     }
 }
