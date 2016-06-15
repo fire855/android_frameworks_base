@@ -339,6 +339,8 @@ public class NotificationManagerService extends SystemService {
     private boolean mDisableDuckingWhileMedia;
     private boolean mActiveMedia;
 
+    private boolean mMultiColorNotificationLed;
+
     private static final int MY_UID = Process.myUid();
     private static final int MY_PID = Process.myPid();
     private static final int REASON_DELEGATE_CLICK = 1;
@@ -1200,6 +1202,9 @@ public class NotificationManagerService extends SystemService {
         mDefaultNotificationLedOff = resources.getInteger(
                 R.integer.config_defaultNotificationLedOff);
 
+        mMultiColorNotificationLed = resources.getBoolean(
+                R.bool.config_multiColorNotificationLed);
+
         mNotificationPulseCustomLedValues = new HashMap<String, NotificationLedValues>();
 
         mPackageNameMappings = new HashMap<String, String>();
@@ -1551,6 +1556,20 @@ public class NotificationManagerService extends SystemService {
         public int getPackageVisibilityOverride(String pkg, int uid) {
             checkCallerIsSystem();
             return mRankingHelper.getPackageVisibilityOverride(pkg, uid);
+        }
+
+        @Override
+        public void setShowNotificationForPackageOnKeyguard(
+                String pkg, int uid, int status) {
+            checkCallerIsSystem();
+            mRankingHelper.setShowNotificationForPackageOnKeyguard(pkg, uid, status);
+            savePolicyFile();
+        }
+
+        @Override
+        public int getShowNotificationForPackageOnKeyguard(String pkg, int uid) {
+            enforceSystemOrSystemUI("INotificationManager.getShowNotificationForPackageOnKeyguard");
+            return mRankingHelper.getShowNotificationForPackageOnKeyguard(pkg, uid);
         }
 
         /**
@@ -3516,6 +3535,9 @@ public class NotificationManagerService extends SystemService {
 
     private int generateLedColorForNotification(NotificationRecord ledNotification) {
         if (!mAutoGenerateNotificationColor) {
+            return mDefaultNotificationColor;
+        }
+        if (!mMultiColorNotificationLed) {
             return mDefaultNotificationColor;
         }
         final String packageName = ledNotification.sbn.getPackageName();

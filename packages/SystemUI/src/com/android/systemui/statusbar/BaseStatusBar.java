@@ -226,6 +226,8 @@ public abstract class BaseStatusBar extends SystemUI implements
     protected WindowManager mWindowManager;
     protected IWindowManager mWindowManagerService;
 
+    private NotificationManager mNoMan;
+
     protected abstract void refreshLayout(int layoutDirection);
 
     protected Display mDisplay;
@@ -432,9 +434,7 @@ public abstract class BaseStatusBar extends SystemUI implements
                     }
                 }
             } else if (BANNER_ACTION_CANCEL.equals(action) || BANNER_ACTION_SETUP.equals(action)) {
-                NotificationManager noMan = (NotificationManager)
-                        mContext.getSystemService(Context.NOTIFICATION_SERVICE);
-                noMan.cancel(R.id.notification_hidden);
+                mNoMan.cancel(R.id.notification_hidden);
 
                 Settings.Secure.putInt(mContext.getContentResolver(),
                         Settings.Secure.SHOW_NOTE_ABOUT_NOTIFICATION_HIDING, 0);
@@ -563,6 +563,9 @@ public abstract class BaseStatusBar extends SystemUI implements
     public void start() {
         mWindowManager = (WindowManager)mContext.getSystemService(Context.WINDOW_SERVICE);
         mWindowManagerService = WindowManagerGlobal.getWindowManagerService();
+
+        mNoMan = (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
+
         mDisplay = mWindowManager.getDefaultDisplay();
         mDevicePolicyManager = (DevicePolicyManager)mContext.getSystemService(
                 Context.DEVICE_POLICY_SERVICE);
@@ -728,9 +731,7 @@ public abstract class BaseStatusBar extends SystemUI implements
                             mContext.getString(R.string.hidden_notifications_setup),
                             setupIntent);
 
-            NotificationManager noMan =
-                    (NotificationManager) mContext.getSystemService(Context.NOTIFICATION_SERVICE);
-            noMan.notify(R.id.notification_hidden, note.build());
+            mNoMan.notify(R.id.notification_hidden, note.build());
         }
     }
 
@@ -956,7 +957,9 @@ public abstract class BaseStatusBar extends SystemUI implements
                 }
             });
 
-            filterButton.setVisibility(View.VISIBLE);
+            Notification notification = sbn.getNotification();
+            filterButton.setVisibility(SpamFilter.hasFilterableContent(notification)
+                    ? View.VISIBLE : View.GONE);
             filterButton.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) {
                     AsyncTask.execute(new Runnable() {
@@ -1293,6 +1296,20 @@ public abstract class BaseStatusBar extends SystemUI implements
     }
 
     protected boolean inflateViews(Entry entry, ViewGroup parent) {
+        final StatusBarNotification sbn = entry.notification;
+        String themePackageName = mCurrentTheme != null
+                ? mCurrentTheme.getOverlayPkgNameForApp(sbn.getPackageName()) : null;
+        boolean inflated = inflateViews(entry, parent, true);
+        if (!inflated && themePackageName != null
+                && !ThemeConfig.SYSTEM_DEFAULT.equals(themePackageName)) {
+            Log.w(TAG, "Couldn't expand themed RemoteViews, trying unthemed for: " + sbn);
+            inflated = inflateViews(entry, mStackScroller, false);
+        }
+
+        return inflated;
+    }
+
+    protected boolean inflateViews(Entry entry, ViewGroup parent, boolean isThemeable) {
         PackageManager pmUser = getPackageManagerForUser(
                 entry.notification.getUser().getIdentifier());
 
@@ -1369,10 +1386,12 @@ public abstract class BaseStatusBar extends SystemUI implements
         View contentViewLocal = null;
         View bigContentViewLocal = null;
         View headsUpContentViewLocal = null;
-        String themePackageName = mCurrentTheme != null
-                ? mCurrentTheme.getOverlayPkgNameForApp(sbn.getPackageName()) : null;
-        String statusBarThemePackageName = mCurrentTheme != null
-                ? mCurrentTheme.getOverlayForStatusBar() : null;
+        String themePackageName = (isThemeable && mCurrentTheme != null)
+                ? mCurrentTheme.getOverlayPkgNameForApp(sbn.getPackageName())
+                : ThemeConfig.SYSTEM_DEFAULT;
+        String statusBarThemePackageName = (isThemeable && mCurrentTheme != null)
+                ? mCurrentTheme.getOverlayForStatusBar()
+                : ThemeConfig.SYSTEM_DEFAULT;
 
         try {
             contentViewLocal = contentView.apply(
@@ -1463,8 +1482,10 @@ public abstract class BaseStatusBar extends SystemUI implements
         }
 
         if (publicViewLocal == null) {
+            final Context layoutContext = isThemeable ? mContext
+                    : maybeGetThemedContext(mContext, ThemeConfig.SYSTEM_DEFAULT);
             // Add a basic notification template
-            publicViewLocal = LayoutInflater.from(mContext).inflate(
+            publicViewLocal = LayoutInflater.from(layoutContext).inflate(
                     R.layout.notification_public_default,
                     contentContainerPublic, false);
             publicViewLocal.setIsRootNamespace(true);
@@ -1899,7 +1920,18 @@ public abstract class BaseStatusBar extends SystemUI implements
     }
 
     private boolean shouldShowOnKeyguard(StatusBarNotification sbn) {
-        return mShowLockscreenNotifications && !mNotificationData.isAmbient(sbn.getKey());
+        if (!mShowLockscreenNotifications || mNotificationData.isAmbient(sbn.getKey())) {
+            return false;
+        }
+        final int showOnKeyguard = mNoMan.getShowNotificationForPackageOnKeyguard(
+                sbn.getPackageName(), sbn.getUid());
+        boolean isKeyguardAllowedForApp =
+                (showOnKeyguard & Notification.SHOW_ALL_NOTI_ON_KEYGUARD) != 0;
+        if (isKeyguardAllowedForApp && sbn.isOngoing()) {
+            isKeyguardAllowedForApp =
+                    (showOnKeyguard & Notification.SHOW_NO_ONGOING_NOTI_ON_KEYGUARD) == 0;
+        }
+        return isKeyguardAllowedForApp;
     }
 
     protected void setZenMode(int mode) {
@@ -2309,5 +2341,25 @@ public abstract class BaseStatusBar extends SystemUI implements
         if (mAssistManager != null) {
             mAssistManager.startAssist(args);
         }
+    }
+
+    /**
+     * Returns a context with the given theme applied or the original context if we fail to get a
+     * themed context.
+     */
+    private Context maybeGetThemedContext(Context context, String themePkg) {
+        Context themedContext;
+        try {
+            ApplicationInfo ai = context.getPackageManager().getApplicationInfo(
+                    context.getPackageName(), 0);
+            themedContext = context.createApplicationContext(ai, themePkg,
+                    0);
+        } catch (PackageManager.NameNotFoundException e) {
+            themedContext = null;
+        }
+        if (themedContext == null) {
+            themedContext = context;
+        }
+        return themedContext;
     }
 }
