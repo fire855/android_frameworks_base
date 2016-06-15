@@ -1050,9 +1050,16 @@ public class KeyguardUpdateMonitor implements TrustManager.TrustListener {
     }
 
     private boolean shouldListenForFingerprint() {
-        return (mKeyguardIsVisible || !mDeviceInteractive || mBouncer || mGoingToSleep)
-                && !mSwitchingUser && !mFingerprintAlreadyAuthenticated
-                && !isFingerprintDisabled(getCurrentUser());
+        if (!mSwitchingUser && !mFingerprintAlreadyAuthenticated
+                && !isFingerprintDisabled(getCurrentUser())) {
+            if (mContext.getResources().getBoolean(
+                    com.android.keyguard.R.bool.config_fingerprintWakeAndUnlock)) {
+                return mKeyguardIsVisible || !mDeviceInteractive || mBouncer || mGoingToSleep;
+            } else {
+                return mDeviceInteractive && (mKeyguardIsVisible || mBouncer);
+            }
+        }
+        return false;
     }
 
     private void startListeningForFingerprint() {
@@ -1108,7 +1115,7 @@ public class KeyguardUpdateMonitor implements TrustManager.TrustListener {
         };
 
         mContext.getContentResolver().registerContentObserver(
-                CMSettings.System.getUriFor(CMSettings.Secure.CM_SETUP_WIZARD_COMPLETED),
+                CMSettings.Secure.getUriFor(CMSettings.Secure.CM_SETUP_WIZARD_COMPLETED),
                 false, mDeviceProvisionedObserver);
 
         // prevent a race condition between where we check the flag and where we register the
